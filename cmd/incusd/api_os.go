@@ -53,6 +53,10 @@ func apiOSProxy(d *Daemon, r *http.Request) response.Response {
 
 	// Handle the request.
 	return response.ManualResponse(func(w http.ResponseWriter) error {
+		// Drop the default JSON content type so that the one from IncusOS is used.
+		// The proxy adds the upstream headers, so it would otherwise be sent twice.
+		w.Header().Del("Content-Type")
+
 		http.StripPrefix("/os", proxy).ServeHTTP(w, r)
 
 		return nil
