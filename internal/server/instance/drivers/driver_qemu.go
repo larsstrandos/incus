@@ -13199,6 +13199,7 @@ func (d *qemu) version() (*version.DottedVersion, error) {
 // Metrics returns the metrics set for the instance.
 func (d *qemu) Metrics() (*metrics.MetricSet, error) {
 	if !d.IsRunning() {
+		qemuAgentWaitClear(d.id)
 		return nil, ErrInstanceIsStopped
 	}
 
@@ -13208,11 +13209,22 @@ func (d *qemu) Metrics() (*metrics.MetricSet, error) {
 			// Only fall back to host side data when the agent isn't running, mixing sources for the same
 			// VM would make the guest counters jump around and read as resets.
 			if errors.Is(err, errQemuAgentOffline) || isMonitorGoneError(err) {
+				// The agent was last seen running, so it's about to report again (it does so every 10s), for
+				// example right after a live migration or a daemon restart. Skip the VM until then instead of
+				// reporting host side counters, which start from zero in a new QEMU process. Fall back if the
+				// agent doesn't report in time, as when the VM is paused or the agent is no longer running
+				// after the migration or restart.
+				if errors.Is(err, errQemuAgentOffline) && d.agentMetricsPending() {
+					return nil, ErrInstanceMetricsPending
+				}
+
 				return d.getQemuMetricsOrStopped()
 			}
 
 			return nil, fmt.Errorf("Could not get VM metrics from agent: %w", err)
 		}
+
+		qemuAgentWaitClear(d.id)
 
 		return agentMetrics, nil
 	}

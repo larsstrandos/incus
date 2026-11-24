@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/lxc/incus/v7/internal/server/instance"
 	"github.com/lxc/incus/v7/internal/server/instance/drivers/qemudefault"
 	"github.com/lxc/incus/v7/internal/server/instance/drivers/qmp"
 	"github.com/lxc/incus/v7/internal/server/instance/instancetype"
@@ -63,6 +66,62 @@ func (d *qemu) getQemuMetrics() (*metrics.MetricSet, error) {
 	}
 
 	return metricSet, nil
+}
+
+// qemuAgentMetricsTimeout is how long a VM whose agent was last seen running is left out of the metrics
+// while waiting for the agent to report in, before falling back to host side metrics. The agent reports
+// every 10s and the monitor checks every 10s, so it's normally back well within this.
+const qemuAgentMetricsTimeout = 30 * time.Second
+
+// qemuAgentWaitState is when a QEMU process started waiting for its agent.
+type qemuAgentWaitState struct {
+	pid   int
+	since time.Time
+}
+
+// qemuAgentWait tracks, by instance ID, the QEMU processes whose metrics are waiting for the agent.
+var (
+	qemuAgentWait   = map[int]qemuAgentWaitState{}
+	qemuAgentWaitMu sync.Mutex
+)
+
+// qemuAgentWaitPending records that the instance's QEMU process is waiting for its agent and reports whether
+// it's still within the timeout. The wait restarts when the QEMU process changes (restart or live migration).
+func qemuAgentWaitPending(id int, pid int, now time.Time) bool {
+	qemuAgentWaitMu.Lock()
+	defer qemuAgentWaitMu.Unlock()
+
+	wait, ok := qemuAgentWait[id]
+	if !ok || wait.pid != pid {
+		wait = qemuAgentWaitState{pid: pid, since: now}
+		qemuAgentWait[id] = wait
+	}
+
+	return now.Sub(wait.since) < qemuAgentMetricsTimeout
+}
+
+// qemuAgentWaitClear forgets the instance's wait for its agent.
+func qemuAgentWaitClear(id int) {
+	qemuAgentWaitMu.Lock()
+	defer qemuAgentWaitMu.Unlock()
+
+	delete(qemuAgentWait, id)
+}
+
+// agentMetricsPending reports whether the VM should be left out of the metrics while its agent reconnects.
+func (d *qemu) agentMetricsPending() bool {
+	// Only wait for an agent that was last seen running.
+	if d.LocalConfig()["volatile.last_state.agent"] != instance.AgentStateStarted {
+		qemuAgentWaitClear(d.id)
+		return false
+	}
+
+	pid, err := d.pid()
+	if err != nil || pid == 0 {
+		return false
+	}
+
+	return qemuAgentWaitPending(d.id, pid, time.Now())
 }
 
 // getQemuNetworkMetrics reads the host side counters of every NIC without instantiating the devices.

@@ -278,8 +278,8 @@ func metricsGet(d *Daemon, r *http.Request) response.Response {
 				projectName := inst.Project().Name
 				instanceMetrics, err := inst.Metrics()
 				if err != nil {
-					// Ignore stopped instances.
-					if !errors.Is(err, instanceDrivers.ErrInstanceIsStopped) {
+					// Ignore stopped instances and those whose metrics are about to be available again.
+					if !errors.Is(err, instanceDrivers.ErrInstanceIsStopped) && !errors.Is(err, instanceDrivers.ErrInstanceMetricsPending) {
 						logger.Warn("Failed getting instance metrics", logger.Ctx{"instance": inst.Name(), "project": projectName, "err": err})
 					}
 				} else {

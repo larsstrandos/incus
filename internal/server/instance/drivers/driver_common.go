@@ -65,6 +65,9 @@ var ErrExecCommandNotExecutable = api.StatusErrorf(http.StatusBadRequest, "Comma
 // ErrInstanceIsStopped indicates that the instance is stopped.
 var ErrInstanceIsStopped error = api.StatusErrorf(http.StatusBadRequest, "The instance is already stopped")
 
+// ErrInstanceMetricsPending indicates that the instance's metrics source isn't available yet but is expected back shortly.
+var ErrInstanceMetricsPending = errors.New("The instance metrics aren't available yet")
+
 // muNUMA is used to serialize NUMA node selection.
 var muNUMA sync.Mutex
 
