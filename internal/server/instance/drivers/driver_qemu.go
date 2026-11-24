@@ -13276,12 +13276,7 @@ func (d *qemu) getAgentMetrics() (*metrics.MetricSet, error) {
 		return nil, err
 	}
 
-	metricSet, err := metrics.MetricSetFromAPI(&m, map[string]string{"project": d.project.Name, "name": d.name, "type": instancetype.VM.String()})
-	if err != nil {
-		return nil, err
-	}
-
-	return metricSet, nil
+	return d.metricSetFromAPI(&m)
 }
 
 func (d *qemu) getNetworkState() (map[string]api.InstanceStateNetwork, error) {

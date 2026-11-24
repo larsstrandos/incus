@@ -60,12 +60,17 @@ func (d *qemu) getQemuMetrics() (*metrics.MetricSet, error) {
 		out.Network = networkStats
 	}
 
-	metricSet, err := metrics.MetricSetFromAPI(&out, map[string]string{"project": d.project.Name, "name": d.name, "type": instancetype.VM.String()})
-	if err != nil {
-		return nil, err
+	return d.metricSetFromAPI(&out)
+}
+
+// metricSetFromAPI converts VM metrics (from the agent or QEMU) into a metric set.
+func (d *qemu) metricSetFromAPI(m *metrics.Metrics) (*metrics.MetricSet, error) {
+	// Neither the agent nor QEMU reports the number of effective CPUs, but both report each online vCPU.
+	if m.CPUs == 0 {
+		m.CPUs = len(m.CPU)
 	}
 
-	return metricSet, nil
+	return metrics.MetricSetFromAPI(m, map[string]string{"project": d.project.Name, "name": d.name, "type": instancetype.VM.String()})
 }
 
 // qemuAgentMetricsTimeout is how long a VM whose agent was last seen running is left out of the metrics
