@@ -15,6 +15,8 @@ The instance metrics are updated when calling the `/1.0/metrics` endpoint.
 To handle multiple scrapers, they are cached for 8 seconds.
 Fetching metrics is a relatively expensive operation for Incus to perform, so if the impact is too high, consider scraping at a higher than default interval.
 
+On IncusOS, the endpoint also includes the host metrics from node-exporter (`node_*`) and the metrics of IncusOS itself (`incusos_*`), so a metrics certificate is enough to monitor the whole system.
+
 ## Query the raw data
 
 To view the raw data that Incus collects, use the [`incus query`](incus_query.md) command to query the `/1.0/metrics` endpoint:
