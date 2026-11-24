@@ -621,28 +621,64 @@ func internalMetrics(ctx context.Context, s *state.State, tx *db.ClusterTx) *met
 	out.AddSamples(metrics.GoStackSysBytes, metrics.Sample{Value: float64(ms.StackSys)})
 	out.AddSamples(metrics.GoSysBytes, metrics.Sample{Value: float64(ms.Sys)})
 
-	// If on IncusOS, include OS metrics.
+	// If on IncusOS, include the host metrics from node-exporter and the metrics of IncusOS itself.
 	if s.OS.IncusOS != nil {
-		client := http.Client{}
-		client.Transport = &http.Transport{
-			DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
-				return net.DialTimeout("tcp", "127.0.0.1:9100", 50*time.Millisecond)
-			},
-			DisableKeepAlives:     true,
-			ExpectContinueTimeout: time.Second * 5,
-			ResponseHeaderTimeout: time.Second * 5,
+		nodeMetrics := fetchRawMetrics(ctx, "tcp", "127.0.0.1:9100", "/metrics")
+		if nodeMetrics != nil {
+			out.AddRaw(nodeMetrics)
 		}
 
-		resp, err := client.Get("http://incus-os/metrics")
-		if err == nil {
-			defer logger.WarnOnError(resp.Body.Close, "Failed to close response body")
-
-			osMetrics, err := io.ReadAll(resp.Body)
-			if err == nil {
-				out.AddRaw(osMetrics)
-			}
+		osMetrics := fetchRawMetrics(ctx, "unix", "/run/incus-os/unix.socket", "/1.0/metrics")
+		if osMetrics != nil {
+			out.AddRaw(osMetrics)
 		}
 	}
 
 	return out
+}
+
+// fetchRawMetrics retrieves metrics in the Prometheus text format from a local endpoint.
+// It returns nil if the endpoint can't be reached or doesn't return metrics, for example
+// on IncusOS releases that don't have a metrics endpoint yet.
+func fetchRawMetrics(ctx context.Context, network string, address string, path string) []byte {
+	client := http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _ string, _ string) (net.Conn, error) {
+				return net.DialTimeout(network, address, 50*time.Millisecond)
+			},
+			DisableKeepAlives:     true,
+			ExpectContinueTimeout: time.Second * 5,
+			ResponseHeaderTimeout: time.Second * 5,
+		},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://incus-os"+path, nil)
+	if err != nil {
+		return nil
+	}
+
+	// The output is appended to our own, so it must not use the OpenMetrics format (# EOF terminator).
+	req.Header.Set("Accept", "text/plain; version=0.0.4")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+
+	defer logger.WarnOnError(resp.Body.Close, "Failed to close response body")
+
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain") {
+		return nil
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+
+	if data[len(data)-1] != '\n' {
+		data = append(data, '\n')
+	}
+
+	return data
 }
