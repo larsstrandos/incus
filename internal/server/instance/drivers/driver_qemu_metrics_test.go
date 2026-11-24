@@ -3,10 +3,43 @@ package drivers
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lxc/incus/v7/internal/server/metrics"
 	"github.com/lxc/incus/v7/shared/api"
 )
+
+func TestQemuAgentWaitPending(t *testing.T) {
+	const id = 1000
+
+	t.Cleanup(func() { qemuAgentWaitClear(id) })
+
+	start := time.Now()
+
+	if !qemuAgentWaitPending(id, 10, start) {
+		t.Fatal("Expected a new wait to be pending")
+	}
+
+	if !qemuAgentWaitPending(id, 10, start.Add(qemuAgentMetricsTimeout-time.Second)) {
+		t.Fatal("Expected the wait to be pending within the timeout")
+	}
+
+	if qemuAgentWaitPending(id, 10, start.Add(qemuAgentMetricsTimeout)) {
+		t.Fatal("Expected the wait to time out")
+	}
+
+	// A new QEMU process (restart or live migration) starts a new wait.
+	if !qemuAgentWaitPending(id, 20, start.Add(qemuAgentMetricsTimeout)) {
+		t.Fatal("Expected a new QEMU process to start a new wait")
+	}
+
+	// Once the agent reports in, the next wait starts from scratch.
+	qemuAgentWaitClear(id)
+
+	if !qemuAgentWaitPending(id, 20, start.Add(2*qemuAgentMetricsTimeout)) {
+		t.Fatal("Expected a cleared wait to start again")
+	}
+}
 
 func TestQemuMetricSetFromAPICPUs(t *testing.T) {
 	d := &qemu{common: common{name: "v1", project: api.Project{Name: "default"}}}
