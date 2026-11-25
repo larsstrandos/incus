@@ -10,6 +10,7 @@ import (
 
 	"github.com/lxc/incus/v7/internal/server/auth"
 	"github.com/lxc/incus/v7/internal/server/response"
+	"github.com/lxc/incus/v7/shared/logger"
 )
 
 // osProxyTransport is shared by all requests to IncusOS so that its connections are reused.
@@ -21,6 +22,16 @@ var osProxyTransport = &http.Transport{
 	},
 	// Below the idle timeout of IncusOS, so idle connections are closed by us first.
 	IdleConnTimeout: 5 * time.Second,
+}
+
+// osProxyErrorHandler reports a failed request to IncusOS, unless the client went away.
+func osProxyErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Context().Err() != nil {
+		return
+	}
+
+	logger.Warn("Failed proxying request to IncusOS", logger.Ctx{"url": r.URL.String(), "err": err})
+	w.WriteHeader(http.StatusBadGateway)
 }
 
 var apiOS = APIEndpoint{
@@ -54,6 +65,7 @@ func apiOSProxy(d *Daemon, r *http.Request) response.Response {
 			r.Out.URL.Scheme = "http"
 			r.Out.URL.Host = "incus-os"
 		},
+		ErrorHandler: osProxyErrorHandler,
 	}
 
 	// Allow IncusOS to adjust the returned paths to the prefix used by the proxy.
