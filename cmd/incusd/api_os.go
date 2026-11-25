@@ -6,10 +6,22 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"time"
 
 	"github.com/lxc/incus/v7/internal/server/auth"
 	"github.com/lxc/incus/v7/internal/server/response"
 )
+
+// osProxyTransport is shared by all requests to IncusOS so that its connections are reused.
+var osProxyTransport = &http.Transport{
+	DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+
+		return d.DialContext(ctx, "unix", "/run/incus-os/unix.socket")
+	},
+	// Below the idle timeout of IncusOS, so idle connections are closed by us first.
+	IdleConnTimeout: 5 * time.Second,
+}
 
 var apiOS = APIEndpoint{
 	Path:   "{name...}",
@@ -37,11 +49,7 @@ func apiOSProxy(d *Daemon, r *http.Request) response.Response {
 
 	// Prepare the proxy.
 	proxy := &httputil.ReverseProxy{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", "/run/incus-os/unix.socket")
-			},
-		},
+		Transport: osProxyTransport,
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL.Scheme = "http"
 			r.Out.URL.Host = "incus-os"
